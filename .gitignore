@@ -1,0 +1,24 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 编辑器配置
+.vscode/
+.idea/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 运行日志与抓拍图片
+runtime_logs/
+capture_images/
+*.log
+
+# 本地模型与大文件
+*.engine
