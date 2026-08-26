@@ -6,7 +6,7 @@ RTSP 视频流模块：
 """
 
 import cv2
-from log import save_capture_image, write_log
+from log import error_log, save_capture_image, write_log
 
 RTSP_URL = "rtsp://admin:zlr151548@192.168.1.64:554/Streaming/Channels/102"
 
@@ -33,6 +33,7 @@ def capture_frame_from_rtsp(video_capture):
     ret, frame = video_capture.read()
     if not ret or frame is None:
         write_log("识别", "RTSP 取帧失败")
+        error_log("识别", "RTSP 取帧失败")
         return None
 
     # 第二步：取帧成功后立即保存当前图片。

@@ -11,6 +11,7 @@ import cv2
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RUNTIME_LOG_DIR = os.path.join(BASE_DIR, "runtime_logs")
+ERROR_LOG_DIR = os.path.join(BASE_DIR, "error_logs")
 CAPTURE_IMAGE_DIR = os.path.join(BASE_DIR, "capture_images")
 
 
@@ -31,6 +32,44 @@ def write_log(stage, message):
     log_file_path = os.path.join(RUNTIME_LOG_DIR, f"water_level_{now.year}-{now.month}-{now.day}.log")
     with open(log_file_path, "a", encoding="utf-8") as log_file:
         log_file.write(log_text + "\n")
+        log_file.flush()
+        os.fsync(log_file.fileno())
+
+
+"""
+作用：输出一条错误日志，同时立即写入错误日志文件，便于单独排查异常、重连和意外情况。
+"""
+def error_log(stage, message):
+    # 第一步：生成当前错误日志时间和日志文本。
+    now = datetime.now()
+    timestamp_text = now.strftime("%Y-%m-%d %H:%M:%S")
+    log_text = f"[{timestamp_text}] [{stage}] {message}"
+
+    # 第二步：先打印到终端，保证错误发生时能实时看到。
+    print(log_text, flush=True)
+
+    # 第三步：按天创建错误日志文件，并强制刷新到磁盘。
+    os.makedirs(ERROR_LOG_DIR, exist_ok=True)
+    log_file_path = os.path.join(ERROR_LOG_DIR, f"error_{now.year}-{now.month}-{now.day}.log")
+    with open(log_file_path, "a", encoding="utf-8") as log_file:
+        log_file.write(log_text + "\n")
+        log_file.flush()
+        os.fsync(log_file.fileno())
+
+
+"""
+作用：在每轮日志结束后写入一个空行，方便区分不同周期的日志记录。
+"""
+def write_round_separator():
+    # 第一步：先在终端输出一个空行。
+    print("", flush=True)
+
+    # 第二步：同步在当日日志文件中写入一个空行。
+    now = datetime.now()
+    os.makedirs(RUNTIME_LOG_DIR, exist_ok=True)
+    log_file_path = os.path.join(RUNTIME_LOG_DIR, f"water_level_{now.year}-{now.month}-{now.day}.log")
+    with open(log_file_path, "a", encoding="utf-8") as log_file:
+        log_file.write("\n")
         log_file.flush()
         os.fsync(log_file.fileno())
 

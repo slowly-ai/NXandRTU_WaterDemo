@@ -4,7 +4,7 @@
 
 import time
 from datetime import datetime
-from log import write_log
+from log import error_log, write_log
 from modbus import set_local_registers, wait_and_reply_once
 from cycle_init import initialize_cycle_resources
 from rtsp import capture_frame_from_rtsp
@@ -88,21 +88,23 @@ def main():
             should_exit_program = True
         except Exception as exc:
             write_log("异常", f"主流程异常 | {exc}")
+            error_log("异常", f"主流程异常 | {exc}")
             if serial_port is not None:
                 try:
                     set_local_registers("error")
                 except Exception as register_exc:
                     write_log("异常", f"写入错误状态寄存器失败 | {register_exc}")
+                    error_log("异常", f"写入错误状态寄存器失败 | {register_exc}")
 
         finally:
             # 第五步：无论本轮成功还是失败，都释放资源并进入下一轮 RTC 休眠。
             if video_capture is not None:
                 video_capture.release()
-                write_log("初始化", "RTSP 视频流已关闭")
+                write_log("休眠", "RTSP 视频流已关闭")
 
             if serial_port is not None and serial_port.is_open:
                 serial_port.close()
-                write_log("通信", "Modbus 串口已关闭")
+                write_log("休眠", "Modbus 串口已关闭")
 
             model = None
 
@@ -111,7 +113,9 @@ def main():
                     cycle_start_epoch = sleep_to_next_cycle(cycle_start_epoch)
                 except Exception as exc:
                     write_log("异常", f"休眠流程异常 | {exc}")
+                    error_log("异常", f"休眠流程异常 | {exc}")
                     write_log("系统", "RTC 休眠失败，程序退出")
+                    error_log("系统", "RTC 休眠失败，程序退出")
                     should_exit_program = True
 
         if should_exit_program:

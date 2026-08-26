@@ -14,6 +14,7 @@ env/
 # 系统文件
 .DS_Store
 Thumbs.db
+nxandrtu-waterdemo.service
 
 # 运行日志与抓拍图片
 runtime_logs/

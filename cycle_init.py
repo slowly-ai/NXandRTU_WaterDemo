@@ -5,7 +5,7 @@
 """
 
 import time
-from log import write_log
+from log import error_log, write_log
 from modbus import open_modbus_serial, set_local_registers
 from rtsp import initialize_rtsp_video_stream
 from water_level_recognition import initialize_water_level_model
@@ -43,6 +43,7 @@ def initialize_cycle_resources(cycle_start_epoch, init_stage_end_seconds):
                     serial_port.close()
                 serial_port = None
                 write_log("初始化", f"Modbus 串口初始化失败 | 第{serial_attempt_count}次 | {exc}")
+                error_log("初始化", f"Modbus 串口初始化失败 | 第{serial_attempt_count}次 | {exc}")
 
         if video_capture is None:
             if not rtsp_start_logged:
@@ -54,6 +55,7 @@ def initialize_cycle_resources(cycle_start_epoch, init_stage_end_seconds):
             except Exception as exc:
                 video_capture = None
                 write_log("初始化", f"RTSP 视频流初始化失败 | 第{rtsp_attempt_count}次 | {exc}")
+                error_log("初始化", f"RTSP 视频流初始化失败 | 第{rtsp_attempt_count}次 | {exc}")
 
         if model is None:
             if not model_start_logged:
@@ -66,6 +68,7 @@ def initialize_cycle_resources(cycle_start_epoch, init_stage_end_seconds):
             except Exception as exc:
                 model = None
                 write_log("初始化", f"水位识别推理引擎初始化失败 | 第{model_attempt_count}次 | {exc}")
+                error_log("初始化", f"水位识别推理引擎初始化失败 | 第{model_attempt_count}次 | {exc}")
 
         if serial_port is not None and video_capture is not None and model is not None:
             break
@@ -80,10 +83,12 @@ def initialize_cycle_resources(cycle_start_epoch, init_stage_end_seconds):
             video_capture.release()
         model = None
         write_log("初始化", "初始化失败，已释放本轮已创建的资源")
+        error_log("初始化", "初始化失败，已释放本轮已创建的资源")
         raise RuntimeError("Modbus 串口未在 15 秒初始化窗口内准备完成")
 
     detector_ready = video_capture is not None and model is not None
     if not detector_ready:
         write_log("初始化", "水位检测资源未在 15 秒内初始化完成，本轮识别按失败处理")
+        error_log("初始化", "水位检测资源未在 15 秒内初始化完成，本轮识别按失败处理")
 
     return serial_port, video_capture, model, detector_ready

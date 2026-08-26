@@ -73,13 +73,13 @@ def set_local_registers(state, water_level_cm=None):
     # 第一步：空闲状态，清空水位数据，ready 置 0。
     if state == "idle":
         LOCAL_REGISTERS = [NO_DATA_WORD, NO_DATA_WORD, 0, STATE_IDLE]
-        write_log("通信", f"本地寄存器已设置为空闲状态 | values={LOCAL_REGISTERS}")
+        write_log("初始化", f"本地寄存器已设置为空闲状态 | values={LOCAL_REGISTERS}")
         return list(LOCAL_REGISTERS)
 
     # 第二步：测量中状态，清空水位数据，state 置为测量中。
     if state == "measuring":
         LOCAL_REGISTERS = [NO_DATA_WORD, NO_DATA_WORD, 0, STATE_MEASURING]
-        write_log("通信", f"本地寄存器已设置为测量中状态 | values={LOCAL_REGISTERS}")
+        write_log("初始化", f"本地寄存器已设置为测量中状态 | values={LOCAL_REGISTERS}")
         return list(LOCAL_REGISTERS)
 
     # 第三步：成功状态，把厘米水位换算成毫米后写入寄存器。
@@ -100,7 +100,7 @@ def set_local_registers(state, water_level_cm=None):
     # 第四步：错误状态，写入无数据标记，ready 置 1，state 置失败。
     if state == "error":
         LOCAL_REGISTERS = [NO_DATA_WORD, NO_DATA_WORD, 1, STATE_READY_ERROR]
-        write_log("通信", f"本地寄存器已设置为错误状态 | values={LOCAL_REGISTERS}")
+        write_log("初始化", f"本地寄存器已设置为错误状态 | values={LOCAL_REGISTERS}")
         return list(LOCAL_REGISTERS)
 
     raise ValueError(f"不支持的寄存器状态: {state}")

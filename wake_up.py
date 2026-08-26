@@ -8,13 +8,13 @@ import os
 import subprocess
 import time
 from datetime import datetime
-from log import write_log
+from log import error_log, write_log, write_round_separator
 
 RTC_DEVICE_PATH = "/dev/rtc0"
 CYCLE_SECONDS = 300
 INIT_STAGE_END_SECONDS = 15
 MODBUS_LISTEN_START_SECONDS = 30
-MODBUS_LISTEN_END_SECONDS = 45
+MODBUS_LISTEN_END_SECONDS = 60
 
 
 """
@@ -46,10 +46,12 @@ def sleep_to_next_cycle(cycle_start_epoch):
 
     # 第二步：只检查 RTC 设备是否存在；真正访问设备由 rtcwake/sudo 完成。
     if not os.path.exists(RTC_DEVICE_PATH):
+        error_log("休眠", f"RTC 设备不存在: {RTC_DEVICE_PATH}")
         raise RuntimeError(f"RTC 设备不存在: {RTC_DEVICE_PATH}")
 
     write_log("休眠", f"下一次唤醒时间 | {datetime.fromtimestamp(float(next_wake_epoch)).strftime('%Y-%m-%d %H:%M:%S')}")
     write_log("休眠", f"准备进入 SC7 深度休眠 | RTC={RTC_DEVICE_PATH}")
+    write_round_separator()
 
     # 第三步：调用 rtcwake 设置硬件 RTC，并进入 mem 休眠。
     rtcwake_command = ["rtcwake", "-m", "mem", "-d", RTC_DEVICE_PATH, "-t", str(int(next_wake_epoch))]
@@ -65,7 +67,9 @@ def sleep_to_next_cycle(cycle_start_epoch):
     if result.returncode != 0:
         error_text = (result.stderr or result.stdout or "").strip()
         if error_text:
+            error_log("休眠", f"rtcwake 执行失败，返回码={result.returncode} | {error_text}")
             raise RuntimeError(f"rtcwake 执行失败，返回码={result.returncode} | {error_text}")
+        error_log("休眠", f"rtcwake 执行失败，返回码={result.returncode}")
         raise RuntimeError(f"rtcwake 执行失败，返回码={result.returncode}")
 
     # 第四步：系统被 RTC 唤醒后，立即输出唤醒日志并返回下一轮周期起点。
