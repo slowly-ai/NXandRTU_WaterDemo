@@ -7,7 +7,7 @@
 
 from log import write_log
 
-SIMULATED_LEVEL_CM = 58.8
+SIMULATED_LEVEL_CM = 78.8
 
 
 """

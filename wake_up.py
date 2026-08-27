@@ -58,18 +58,34 @@ def sleep_to_next_cycle(cycle_start_epoch):
     if not (hasattr(os, "geteuid") and os.geteuid() == 0):
         rtcwake_command = ["sudo", "-n", *rtcwake_command]
 
-    result = subprocess.run(
-        rtcwake_command,
-        capture_output=True,
-        check=False,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            rtcwake_command,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+    except Exception as exc:
+        detail_text = (
+            f"错误种类: rtcwake 命令启动失败\n"
+            f"异常类型: {type(exc).__name__}\n"
+            f"异常信息: {exc}\n"
+        )
+        error_log("休眠", f"rtcwake 命令启动失败 | {exc}", detail_text)
+        raise
+
     if result.returncode != 0:
         error_text = (result.stderr or result.stdout or "").strip()
+        detail_text = (
+            f"错误种类: rtcwake 执行失败\n"
+            f"错误码: returncode={result.returncode}\n"
+            f"stdout:\n{(result.stdout or '').strip()}\n"
+            f"stderr:\n{(result.stderr or '').strip()}\n"
+        )
         if error_text:
-            error_log("休眠", f"rtcwake 执行失败，返回码={result.returncode} | {error_text}")
+            error_log("休眠", f"rtcwake 执行失败，返回码={result.returncode} | {error_text}", detail_text)
             raise RuntimeError(f"rtcwake 执行失败，返回码={result.returncode} | {error_text}")
-        error_log("休眠", f"rtcwake 执行失败，返回码={result.returncode}")
+        error_log("休眠", f"rtcwake 执行失败，返回码={result.returncode}", detail_text)
         raise RuntimeError(f"rtcwake 执行失败，返回码={result.returncode}")
 
     # 第四步：系统被 RTC 唤醒后，立即输出唤醒日志并返回下一轮周期起点。

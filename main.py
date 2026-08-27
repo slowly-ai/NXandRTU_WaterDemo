@@ -2,6 +2,8 @@
 作用：主入口
 """
 
+import sys
+import traceback
 import time
 from datetime import datetime
 from log import error_log, write_log
@@ -38,6 +40,7 @@ def main():
         model = None
         should_enter_sleep = True
         should_exit_program = False
+        exit_code = 0
 
         try:
             # 第二步：进入本轮周期，先在前 15 秒内完成外设与算法资源初始化。
@@ -70,7 +73,7 @@ def main():
             else:
                 set_local_registers("error")
 
-            # 第四步：T+30 到 T+45 之间监听 RTU 主站读取请求。
+            # 第四步：T+30 到 T+60 之间监听 RTU 主站读取请求。
             wait_until_cycle_offset(cycle_start_epoch, MODBUS_LISTEN_START_SECONDS, "通信")
             listen_timeout_seconds = max(0.0, cycle_start_epoch + MODBUS_LISTEN_END_SECONDS - time.time())
             if listen_timeout_seconds > 0:
@@ -113,13 +116,22 @@ def main():
                     cycle_start_epoch = sleep_to_next_cycle(cycle_start_epoch)
                 except Exception as exc:
                     write_log("异常", f"休眠流程异常 | {exc}")
-                    error_log("异常", f"休眠流程异常 | {exc}")
+                    error_log(
+                        "异常",
+                        f"休眠流程异常 | {exc}",
+                        (
+                            f"错误类型: {type(exc).__name__}\n"
+                            f"异常信息: {exc}\n"
+                            f"traceback:\n{traceback.format_exc()}"
+                        ),
+                    )
                     write_log("系统", "RTC 休眠失败，程序退出")
                     error_log("系统", "RTC 休眠失败，程序退出")
                     should_exit_program = True
+                    exit_code = 1
 
         if should_exit_program:
-            break
+            sys.exit(exit_code)
 
 
 if __name__ == "__main__":

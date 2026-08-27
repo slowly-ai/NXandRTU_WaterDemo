@@ -37,9 +37,9 @@ def write_log(stage, message):
 
 
 """
-作用：输出一条错误日志，同时立即写入错误日志文件，便于单独排查异常、重连和意外情况。
+作用：输出一条错误日志，同时立即写入错误日志文件；有详细信息时一并写入，便于定位错误具体原因。
 """
-def error_log(stage, message):
+def error_log(stage, message, detail_text=None):
     # 第一步：生成当前错误日志时间和日志文本。
     now = datetime.now()
     timestamp_text = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -53,6 +53,8 @@ def error_log(stage, message):
     log_file_path = os.path.join(ERROR_LOG_DIR, f"error_{now.year}-{now.month}-{now.day}.log")
     with open(log_file_path, "a", encoding="utf-8") as log_file:
         log_file.write(log_text + "\n")
+        if detail_text:
+            log_file.write(str(detail_text).rstrip() + "\n")
         log_file.flush()
         os.fsync(log_file.fileno())
 
