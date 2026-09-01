@@ -1,13 +1,18 @@
 """
-NVIDIA Jetson Orin NX 水位监测项目的 Modbus 从站基础模块：
+NVIDIA Jetson Orin NX 水位监测项目的 Modbus 基础模块：
 1. 打开串口
 2. 更新本地寄存器
 3. 等待主站读取并回发响应
+4. 读取 RTU 时间并校准系统时间
 """
 
+import subprocess
 import time
+from datetime import datetime
+
 import serial
-from log import write_log
+
+from log import error_log, write_log
 
 # 串口参数
 SERIAL_PORT = "/dev/modbus_485"
@@ -30,6 +35,14 @@ STATE_MEASURING = 1
 STATE_READY_OK = 2
 STATE_READY_ERROR = 3
 NO_DATA_WORD = 0xFFFF
+
+# RTU 时间读取参数
+TIME_RTU_ID = 0xFE
+TIME_FUNCTION_CODE = 0x04
+TIME_REG_ADDR = 0x0042
+TIME_REG_COUNT = 0x0004
+TIME_RESPONSE_LENGTH = 13
+RTC_DEVICE_PATH = "/dev/rtc0"
 
 # 本地保持寄存器定义：
 # REG_ADDR + 0：水位高 16 位
@@ -61,6 +74,136 @@ def open_modbus_serial():
 
     write_log("初始化", f"Modbus 串口初始化完成 | 串口={SERIAL_PORT}")
     return serial_port
+
+
+"""
+作用：读取 RTU 返回的时间寄存器，并据此校准 Jetson 系统时间和硬件 RTC。
+成功返回 True；失败只记录错误并返回 False，不阻断本轮其他流程。
+"""
+def read_rtu_time_and_calibrate(serial_port, timeout_seconds=2.0):
+    # 第一步：组装读取 RTU 时间的请求帧。
+    request_payload = bytes(
+        (
+            TIME_RTU_ID,
+            TIME_FUNCTION_CODE,
+            (TIME_REG_ADDR >> 8) & 0xFF,
+            TIME_REG_ADDR & 0xFF,
+            (TIME_REG_COUNT >> 8) & 0xFF,
+            TIME_REG_COUNT & 0xFF,
+        )
+    )
+    crc = 0xFFFF
+    for byte in request_payload:
+        crc ^= byte
+        for _ in range(8):
+            if crc & 0x0001:
+                crc = (crc >> 1) ^ 0xA001
+            else:
+                crc >>= 1
+    request_frame = request_payload + bytes((crc & 0xFF, (crc >> 8) & 0xFF))
+
+    def bcd_to_int(value):
+        high = (value >> 4) & 0x0F
+        low = value & 0x0F
+        if high > 9 or low > 9:
+            raise ValueError(f"非法 BCD 字节: 0x{value:02X}")
+        return high * 10 + low
+
+    # 第二步：发送请求并读取响应。
+    try:
+        if hasattr(serial_port, "reset_input_buffer"):
+            serial_port.reset_input_buffer()
+        if hasattr(serial_port, "reset_output_buffer"):
+            serial_port.reset_output_buffer()
+        serial_port.write(request_frame)
+        serial_port.flush()
+
+        response_buffer = bytearray()
+        deadline = time.monotonic() + float(timeout_seconds)
+        while len(response_buffer) < TIME_RESPONSE_LENGTH and time.monotonic() < deadline:
+            chunk = serial_port.read(TIME_RESPONSE_LENGTH - len(response_buffer))
+            if chunk:
+                response_buffer.extend(chunk)
+    except Exception as exc:
+        error_log("初始化", f"RTU 时间读取失败 | {type(exc).__name__}: {exc}")
+        return False
+
+    response_frame = bytes(response_buffer)
+    if len(response_frame) != TIME_RESPONSE_LENGTH:
+        error_log("初始化", f"RTU 时间响应长度错误 | 实际长度={len(response_frame)}")
+        return False
+
+    # 第三步：校验响应帧格式和 CRC。
+    if response_frame[0] != TIME_RTU_ID:
+        error_log("初始化", f"RTU 时间响应地址错误 | 帧={response_frame.hex().upper()}")
+        return False
+    if response_frame[1] & 0x80:
+        error_log("初始化", f"RTU 时间读取异常响应 | 帧={response_frame.hex().upper()}")
+        return False
+    if response_frame[1] != TIME_FUNCTION_CODE or response_frame[2] != 8:
+        error_log("初始化", f"RTU 时间响应功能码或字节数错误 | 帧={response_frame.hex().upper()}")
+        return False
+
+    received_crc = response_frame[-2] | (response_frame[-1] << 8)
+    crc = 0xFFFF
+    for byte in response_frame[:-2]:
+        crc ^= byte
+        for _ in range(8):
+            if crc & 0x0001:
+                crc = (crc >> 1) ^ 0xA001
+            else:
+                crc >>= 1
+    if received_crc != (crc & 0xFFFF):
+        error_log("初始化", f"RTU 时间响应 CRC 校验失败 | 帧={response_frame.hex().upper()}")
+        return False
+
+    # 第四步：按 BCD 码解析年月日时分秒。
+    try:
+        year = 2000 + bcd_to_int(response_frame[3])
+        month = bcd_to_int(response_frame[4])
+        day = bcd_to_int(response_frame[5])
+        hour = bcd_to_int(response_frame[6])
+        minute = bcd_to_int(response_frame[7])
+        second = bcd_to_int(response_frame[8])
+        rtu_datetime = datetime(year, month, day, hour, minute, second)
+    except Exception as exc:
+        error_log("初始化", f"RTU 时间数据解析失败 | {type(exc).__name__}: {exc}")
+        return False
+
+    # 第五步：设置系统时间并同步到硬件 RTC。
+    time_text = rtu_datetime.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        set_time_result = subprocess.run(
+            ["sudo", "-n", "date", "-s", time_text],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+    except Exception as exc:
+        error_log("初始化", f"Jetson 系统时间校准命令启动失败 | {type(exc).__name__}: {exc}")
+        return False
+    if set_time_result.returncode != 0:
+        error_text = (set_time_result.stderr or set_time_result.stdout or "").strip()
+        error_log("初始化", f"Jetson 系统时间校准失败 | {error_text}")
+        return False
+
+    try:
+        rtc_result = subprocess.run(
+            ["sudo", "-n", "hwclock", "--systohc", "--utc", "-f", RTC_DEVICE_PATH],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+    except Exception as exc:
+        error_log("初始化", f"Jetson 硬件 RTC 同步命令启动失败 | {type(exc).__name__}: {exc}")
+        return False
+    if rtc_result.returncode != 0:
+        error_text = (rtc_result.stderr or rtc_result.stdout or "").strip()
+        error_log("初始化", f"Jetson 硬件 RTC 同步失败 | {error_text}")
+        return False
+
+    write_log("初始化", f"RTU 时间校准完成 | 时间={time_text}")
+    return True
 
 
 """

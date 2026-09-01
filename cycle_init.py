@@ -6,7 +6,7 @@
 
 import time
 from log import error_log, write_log
-from modbus import open_modbus_serial, set_local_registers
+from modbus import open_modbus_serial, read_rtu_time_and_calibrate, set_local_registers
 from rtsp import initialize_rtsp_video_stream
 from water_level_recognition import initialize_water_level_model
 
@@ -15,9 +15,9 @@ from water_level_recognition import initialize_water_level_model
 作用：在单轮周期的初始化窗口内完成 Modbus 串口、RTSP 视频流和推理引擎初始化。
 成功返回串口对象、视频流对象和模型对象；失败则抛出异常交给主流程处理。
 """
-def initialize_cycle_resources(cycle_start_epoch, init_stage_end_seconds):
+def initialize_cycle_resources(cycle_start_epoch, init_stage_end_seconds, should_calibrate_time=False):
     # 第一步：计算初始化阶段截止时间，并准备资源变量。
-    init_deadline_epoch = float(cycle_start_epoch) + float(init_stage_end_seconds)
+    init_deadline_monotonic = time.monotonic() + float(init_stage_end_seconds)
     serial_port = None
     video_capture = None
     model = None
@@ -29,7 +29,7 @@ def initialize_cycle_resources(cycle_start_epoch, init_stage_end_seconds):
     model_start_logged = False
 
     # 第二步：在初始化窗口内持续尝试打开串口、视频流和推理模型。
-    while time.time() < init_deadline_epoch:
+    while time.monotonic() < init_deadline_monotonic:
         if serial_port is None:
             if not serial_start_logged:
                 write_log("初始化", "开始初始化 Modbus 串口")
@@ -37,6 +37,8 @@ def initialize_cycle_resources(cycle_start_epoch, init_stage_end_seconds):
             serial_attempt_count += 1
             try:
                 serial_port = open_modbus_serial()
+                if should_calibrate_time:
+                    read_rtu_time_and_calibrate(serial_port)
                 set_local_registers("measuring")
             except Exception as exc:
                 if serial_port is not None and serial_port.is_open:
@@ -73,7 +75,7 @@ def initialize_cycle_resources(cycle_start_epoch, init_stage_end_seconds):
         if serial_port is not None and video_capture is not None and model is not None:
             break
 
-        remaining_seconds = init_deadline_epoch - time.time()
+        remaining_seconds = init_deadline_monotonic - time.monotonic()
         if remaining_seconds > 0:
             time.sleep(min(0.5, remaining_seconds))
 

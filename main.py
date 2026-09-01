@@ -7,7 +7,12 @@ import traceback
 import time
 from datetime import datetime
 from log import error_log, write_log
-from modbus import set_local_registers, wait_and_reply_once
+from modbus import (
+    open_modbus_serial,
+    read_rtu_time_and_calibrate,
+    set_local_registers,
+    wait_and_reply_once,
+)
 from cycle_init import initialize_cycle_resources
 from rtsp import capture_frame_from_rtsp
 from simulate_water_level import run_simulated_water_level_detection
@@ -16,7 +21,6 @@ from wake_up import (
     CYCLE_SECONDS,
     INIT_STAGE_END_SECONDS,
     MODBUS_LISTEN_END_SECONDS,
-    MODBUS_LISTEN_START_SECONDS,
     sleep_to_next_cycle,
     wait_until_cycle_offset,
 )
@@ -26,10 +30,24 @@ from wake_up import (
 作用：按单轮周期执行初始化、水位识别、等待主站读取和休眠唤醒循环。
 """
 def main():
-    # 第一步：程序首次启动后，先对齐到下一次整 5 分钟时间点。
+    # 第一步：程序首次启动后，先读取 RTU 时间并校准 Jetson 时间。
+    startup_serial_port = None
+    current_epoch = time.time()
+    write_log("系统", f"程序启动 | 当前时间={datetime.fromtimestamp(current_epoch).strftime('%Y-%m-%d %H:%M:%S')}")
+
+    try:
+        startup_serial_port = open_modbus_serial()
+        read_rtu_time_and_calibrate(startup_serial_port)
+    except Exception as exc:
+        write_log("异常", f"首轮校时失败 | {exc}")
+        error_log("异常", f"首轮校时失败 | {type(exc).__name__}: {exc}")
+    finally:
+        if startup_serial_port is not None and startup_serial_port.is_open:
+            startup_serial_port.close()
+
+    # 第二步：以校准后的系统时间计算首个整 5 分钟周期。
     current_epoch = time.time()
     cycle_start_epoch = (int(current_epoch) // CYCLE_SECONDS + 1) * CYCLE_SECONDS
-    write_log("系统", f"程序启动 | 当前时间={datetime.fromtimestamp(current_epoch).strftime('%Y-%m-%d %H:%M:%S')}")
     write_log("对齐", f"首轮启动等待整 5 分钟对齐 | 目标时间={datetime.fromtimestamp(cycle_start_epoch).strftime('%Y-%m-%d %H:%M:%S')}")
     wait_until_cycle_offset(cycle_start_epoch, 0, "对齐")
     write_log("唤醒", "首轮对齐完成，开始执行第一轮业务")
@@ -50,11 +68,16 @@ def main():
             serial_port, video_capture, model, detector_ready = initialize_cycle_resources(
                 cycle_start_epoch,
                 INIT_STAGE_END_SECONDS,
+                should_calibrate_time=(
+                    datetime.fromtimestamp(cycle_start_epoch).hour in (0, 12)
+                    and datetime.fromtimestamp(cycle_start_epoch).minute == 0
+                ),
             )
 
-            wait_until_cycle_offset(cycle_start_epoch, INIT_STAGE_END_SECONDS, "初始化")
+            # 初始化完成后，以校准后的系统时间重新确认本轮整 5 分钟周期起点。
+            cycle_start_epoch = (int(time.time()) // CYCLE_SECONDS) * CYCLE_SECONDS
 
-            # 第三步：T+15 到 T+30 之间执行取流和水位识别。
+            # 第三步：初始化完成后立即执行取流和水位识别。
             result = "初始化失败"
             if detector_ready:
                 write_log("识别", "开始执行水位检测")
@@ -73,8 +96,7 @@ def main():
             else:
                 set_local_registers("error")
 
-            # 第四步：T+30 到 T+60 之间监听 RTU 主站读取请求。
-            wait_until_cycle_offset(cycle_start_epoch, MODBUS_LISTEN_START_SECONDS, "通信")
+            # 第四步：寄存器写入完成后立即监听 RTU 主站读取请求，最晚到 T+60 秒。
             listen_timeout_seconds = max(0.0, cycle_start_epoch + MODBUS_LISTEN_END_SECONDS - time.time())
             if listen_timeout_seconds > 0:
                 read_success = wait_and_reply_once(serial_port, timeout_seconds=listen_timeout_seconds)
